@@ -10,6 +10,7 @@ import cm.connect.technology.scratchcard.repositories.ScratchInstanceGameReposit
 import cm.connect.technology.scratchcard.services.ScratchInstanceGameService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -25,17 +26,22 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
     private ScratchInstanceGameRepository scratchInstanceGameRepository;
     @Autowired
     private ScratchCardRepositories scratchCardRepositories;
-    @Override
-    public ResponseDto<ScratchInstanceGame> createInstanceGame(CreateGameDto dto, Locale locale) {
 
+
+
+
+    @Override
+    @Scheduled(fixedRate = 60000)
+    public ResponseDto<ScratchInstanceGame> createInstanceGame(CreateGameDto dto, Locale locale) {
 
 
         ResponseDto<ScratchInstanceGame> response = new ResponseDto<>();
         List<String> messages = new ArrayList<String>();
         try {
             if (dto.getScratchFormatGain().getRepeatingNumber() < dto.getScratchFormatGain().getTotalNumber()) {
-                // Calculer le nombre de minute entre la date de début et la date de fin de l'instance
-                if (dto.getStartDate().isBefore(dto.getEndDate()) && dto.getStartDate().isBefore(LocalDateTime.now())) {
+                if (dto.getStartDate().isBefore(dto.getEndDate()) && dto.getStartDate().isAfter(LocalDateTime.now())) {
+                    // Calculer le nombre de minute entre la date de début et la date de fin de l'instance
+
                     long nombreMinutes = Duration.between(dto.getStartDate(), dto.getEndDate()).toMinutes();
 
                     // Calculer le nombre de minute par sessions à générer
@@ -59,21 +65,40 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
                             .totalCard(dto.getTotalCard())
                             .build();
                     ScratchInstanceGame instanceGame1 = scratchInstanceGameRepository.save(instanceGame);
-                    List<ScratchCard> cardList = new ArrayList<>(createCard(dto.getScratchFormatGain(), instanceGame1.getId(), dto.getPrizesDistributions(), dto.getTotalCard(), locale));
 
 
-                   // instanceGame1.setScratchCards(cardList);
+                    // instanceGame1.setScratchCards(cardList);
                     response.setBody(instanceGame1);
 
                     // On genere toutes les sessions de l'instance et on les stocke en base de données
                     // On initialise la date de debut de la premiere session
                     LocalDateTime debutDeSession = dto.getStartDate();
-                    List<Session> sessionList = new ArrayList<>();
-                    List<ScratchCard> cardSession = cardList.subList(0, intValue);
-                    for (int i = 1; i <= dto.getNumberOfSession(); i++) {
-                        // On Calcule la date de fin pour chaque session
 
-                        System.out.println("fhjg");
+                    List<ScratchCard> cardList = new ArrayList<>(createCard(dto.getScratchFormatGain(), instanceGame1.getId(), dto.getPrizesDistributions(), dto.getTotalCard(), dto.getNumberOfSession(), locale));
+
+
+//****************************************************************************************************************
+                    // determine le nombre de carte par session
+                    int nbrCard = cardList.size() / dto.getNumberOfSession();
+                    List<Session> sessionList = new ArrayList<>();
+
+                    System.out.println("nombre de carte par session = " + nbrCard);
+                    // boucle de session
+                    for (int i = 1; i <= dto.getNumberOfSession(); i++) {
+                        System.out.println("nombre de carte par shion = " + nbrCard);
+                        // tu definis la liste vide des carte de la session
+                        List<ScratchCard> sessionListCard = new ArrayList<>();
+
+                        // tu remplie la liste de carte de tes sessions
+                        for (int t = 0; t < nbrCard; t++) {
+                            if (i == dto.getNumberOfSession()) {
+                                sessionListCard = cardList.subList(0,cardList.size());
+                            } else {
+                                sessionListCard.add(cardList.get(0));
+                                cardList.remove(0);
+
+                            }
+                        }
                         LocalDateTime finDeSession = debutDeSession.plus(nombreMinutesPerSession, ChronoUnit.MINUTES);
                         Session instanceGameSession = Session.builder()
                                 //                 .id(UUID.randomUUID().toString())
@@ -81,35 +106,35 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
                                 .startTime(debutDeSession)
                                 .endTime(finDeSession)
                                 .ouvert(false)
-                                //  .scratchCard(cardList.subList(0, intValue))
+                                .scratchCards(sessionListCard)
+                                //.scratchCards(new ArrayList<>(createCard(dto.getScratchFormatGain(), instanceGame1.getId(), dto.getPrizesDistributions(), dto.getTotalCard(), dto.getNumberOfSession(), locale)))
                                 .build();
-                        //On ajoute la session cree dans l'Instance de jeu correspondant
-                        instanceGameSession.setScratchCards(cardList);
-
                         sessionList.add(instanceGameSession);
 
-                        // On met à jour la date de debut de session pour la session suivante
                         debutDeSession = finDeSession;
-                        ScratchInstanceGame instanceGame2 = scratchInstanceGameRepository.save(instanceGame1);
 
                     }
+//*****************************************************************************************************************
+
                     instanceGame1.setSessions(sessionList);
+                    response.setBody(scratchInstanceGameRepository.save(instanceGame1));
 
-
-                    ScratchInstanceGame instanceGame3 = scratchInstanceGameRepository.save(instanceGame1);
-                    response.setBody(instanceGame3);
                 } else {
                     // messages.add("the startDate is not correct");
                     response.setMessages(Collections.singletonList("the startDate is not correct"));
                     response.setBody(null);
+
                 }
-            }else response.setMessages(Collections.singletonList("the repeatingNumber is not correct"));
+                // response.setBody(instanceGame1);
+
+            }else{
+                response.setMessages(Collections.singletonList("the repeatingNumber is not correct"));
                 response.setBody(null);
-
-
+            }
         }catch(Exception e){
           //  throw new RuntimeException(e.getMessage());
         }
+
 
         return response;
     }
@@ -118,15 +143,15 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
 
 
 
-    public List<ScratchCard> createCard(ScratchFormatGain scratchFormatGain, Long instanceGameId, List<PrizesDistribution> prizesDistributions, Long totalCard, Locale locale) {
+    public List<ScratchCard> createCard(ScratchFormatGain scratchFormatGain, Long instanceGameId, List<PrizesDistribution> prizesDistributions, Long totalCard,int numberOfSession, Locale locale) {
         ResponseDto<ScratchInstanceGame> response = new ResponseDto<>();
         List<String> messages = new ArrayList<String>();
         List<ScratchCard> scratchCards = new ArrayList<>();
         try {
-            if (scratchFormatGain.getRepeatingNumber() < scratchFormatGain.getTotalNumber()) {
 
                 for (PrizesDistribution prizesDistribution : prizesDistributions) {
-                    Long cardNumber = prizesDistribution.getNumberOfTicket();
+                    Long cardNumber =  prizesDistribution.getNumberOfTicket(); ;
+                    System.out.println( cardNumber);
 
                     for (int n = 0; n < cardNumber; n++) {
 
@@ -199,10 +224,7 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
                     }
                     Collections.shuffle(scratchCards);
                 }
-            } else {
-                messages.add("the repeatingNumber is not correct");
-                response.setBody(null);
-            }
+
         }catch(Exception e){
             //  throw new RuntimeException(e.getMessage());
         }
@@ -210,6 +232,7 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
         return scratchCards;
     }
     @Override
+    @Scheduled(fixedRate = 60000)
     public ResponseDto<ScratchInstanceGame> startInstance(LocalDateTime startDate, Locale locale) {
         ResponseDto<ScratchInstanceGame> response = new ResponseDto<>();
         List<String> messages = new ArrayList<String>();
@@ -300,6 +323,7 @@ public class ScratchInstanceGameServiceImpl implements ScratchInstanceGameServic
     }
 
     @Override
+    @Scheduled(fixedRate = 60000)
     public ResponseDto<ScratchInstanceGame> desactiveSession(LocalDateTime startDate, Locale locale) {
 
         ResponseDto<ScratchInstanceGame> response = new ResponseDto<>();
